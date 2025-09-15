@@ -3,11 +3,13 @@ pragma solidity ^0.8.20;
 
 // NOTE: Placeholder deploy helper; not a forge-std Script.
 
-import "solidity-examples/contracts/lzApp/mocks/LZEndpointMock.sol";
+import {GatedLZEndpointMock} from "../src/layerzero/GatedLZEndpointMock.sol";
 import {TokenA} from "../src/tokens/TokenA.sol";
 import {OFT_A} from "../src/oft/OFT_A.sol";
 import {OFT_B} from "../src/oft/OFT_B.sol";
 import {ICommonOFT} from "solidity-examples/contracts/token/oft/v2/interfaces/ICommonOFT.sol";
+import {Verifier} from "../src/infra/Verifier.sol";
+import {Executor} from "../src/infra/Executor.sol";
 
 contract DeployAll {
     struct Deployed {
@@ -19,8 +21,8 @@ contract DeployAll {
     }
 
     function deploy() external returns (Deployed memory d) {
-        LZEndpointMock epA = new LZEndpointMock(101);
-        LZEndpointMock epB = new LZEndpointMock(102);
+        GatedLZEndpointMock epA = new GatedLZEndpointMock(101);
+        GatedLZEndpointMock epB = new GatedLZEndpointMock(102);
 
         TokenA tA = new TokenA();
 
@@ -41,6 +43,16 @@ contract DeployAll {
         oB.setMinDstGas(101, 1, 200000);
         oA.setTrustedRemote(102, remotePathAtoB);
         oB.setTrustedRemote(101, remotePathBtoA);
+
+        // Deploy verifier + executor per chain and register
+        Verifier vA = new Verifier();
+        Verifier vB = new Verifier();
+        Executor exA = new Executor(address(epA));
+        Executor exB = new Executor(address(epB));
+        epA.setVerifier(address(vA));
+        epB.setVerifier(address(vB));
+        epA.setExecutor(address(exA));
+        epB.setExecutor(address(exB));
 
         d = Deployed(address(epA), address(epB), address(tA), address(oA), address(oB));
     }

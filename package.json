@@ -1,0 +1,22 @@
+{
+  "name": "layerzero-setup-vnets",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local LayerZero OFT setup with Verifier Network & Executors",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "agent:verifier": "ts-node --esm agents/verifier-agent.ts",
+    "agent:executor": "ts-node --esm agents/executor-agent.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.2"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.2"
+  }
+}
+

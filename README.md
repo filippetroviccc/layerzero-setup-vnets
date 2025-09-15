@@ -1,6 +1,6 @@
 # LayerZero OFT Local Setup (Initial Scaffold)
 
-This repository sets up a minimal local environment to experiment with Omnichain Fungible Tokens (OFTs) using official LayerZero OFTV2 contracts and the official `LZEndpointMock`.
+This repository sets up a local environment to experiment with Omnichain Fungible Tokens (OFTs) using OFTV2 and a gated LayerZero endpoint mock that requires a Verifier + Executor, per the PRD.
 
 ## Layout
 
@@ -8,9 +8,13 @@ This repository sets up a minimal local environment to experiment with Omnichain
 - `src/oft/` — Thin wrappers around official OFTV2:
   - `OFT_A` (ProxyOFTV2) locks the canonical ERC20 on Chain A
   - `OFT_B` (OFTV2) mints/burns the representation on Chain B
-- Official mocks from LayerZero are pulled via `solidity-examples` dependency.
+- `src/layerzero/GatedLZEndpointMock.sol` — Endpoint mock that enqueues messages and requires verification + execution
+- `src/infra/Verifier.sol` — Off-chain agent submits `messageId` attestations
+- `src/infra/Executor.sol` — Called by off-chain agent to trigger delivery on the endpoint
+- Official examples from LayerZero are pulled via `solidity-examples` dependency.
 - `script/` — Placeholder deploy/config scripts (no forge-std deps yet).
 - `test/` — A Foundry test that validates the basic bridge flow.
+ - `agents/` — Minimal TypeScript agents to simulate verifier/executor off-chain
 
 ## Prerequisites
 
@@ -25,19 +29,40 @@ forge build
 forge test -vvv
 ```
 
-`test/BridgeTest.t.sol` deploys LayerZero `LZEndpointMock` for two chain IDs, deploys `TokenA` + `OFT_A` (ProxyOFTV2) on Chain A and `OFT_B` (OFTV2) on Chain B, wires trusted remotes/min gas, then bridges tokens from Chain A to Chain B.
+`test/BridgeTest.t.sol` deploys gated endpoints for two chain IDs, deploys `TokenA` + `OFT_A` (ProxyOFTV2) on Chain A and `OFT_B` (OFTV2) on Chain B, wires trusted remotes/min gas, then demonstrates that bridging requires:
+
+- Verifier to attest the queued message id
+- Executor to call the endpoint to deliver
 
 ## How It Works (Simplified)
 
-- `LZEndpointMock` keeps a mapping of remote endpoints by chain ID and forwards payloads to the remote OFT.
+- `GatedLZEndpointMock` keeps a mapping of remote endpoints by chain ID and enqueues payloads.
+- Verifier must mark the `messageId` as verified before delivery.
+- Executor triggers delivery which calls `lzReceive` on the destination OFT.
 - `SimpleOFT` stores a `trustedRemoteOFT` per chain. `sendToChain` burns local tokens then asks the mock endpoint to deliver a mint request to the remote OFT, which mints on receipt.
 - `SimpleERC20` supports `ownerMint` (bootstrap supply) and a `minter` (the OFT) that can `mint`/`burnFrom` for bridging.
 
-## Next Steps (per PRD)
+## Off-Chain Agents (local)
 
-- Optionally replace the mocks with real LayerZero endpoints on testnets.
-- Convert `script/*.s.sol` to use `forge-std/Script.sol` and point at two Anvil nodes via `--rpc-url` flags.
-- Expand tests to cover allowances, reentrancy and failure scenarios.
+- `agents/verifier-agent.ts`: listens for `MessageQueued` on the source endpoint and calls `Verifier.submitAttestation(messageId)`.
+- `agents/executor-agent.ts`: listens for `Verified` and calls `Executor.execute(messageId)`.
+
+Setup:
+- Copy `.env.example` to `.env` and fill addresses.
+- Install deps: `npm install`
+
+Env variables:
+- `RPC_URL` or `RPC_URL_A`
+- `ENDPOINT_ADDR` (verifier agent)
+- `VERIFIER_ADDR`
+- `EXECUTOR_ADDR` (executor agent)
+- `PRIVATE_KEY` (Anvil’s default works for local)
+
+Run agents with npm scripts:
+- `npm run agent:verifier`
+- `npm run agent:executor`
+
+See RUNBOOK.md for a full step-by-step deployment and run guide.
 
 ## Two-Node Local Run (future wiring)
 
@@ -50,5 +75,5 @@ anvil --port 8545 --chain-id 101
 # Terminal 2
 anvil --port 9545 --chain-id 102
 
-# Then replace placeholder scripts with forge-std variants to deploy to each RPC and configure remotes/trusted peers.
+# Then replace placeholder scripts with forge-std variants to deploy to each RPC, configure remotes/trusted peers, and set endpoint verifier/executor addresses.
 ```
