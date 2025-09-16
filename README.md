@@ -52,17 +52,45 @@ Setup:
 - Install deps: `npm install`
 
 Env variables:
-- `RPC_URL` or `RPC_URL_A`
+- `RPC_URL` or `RPC_URL_A` (HTTP)
+- `WS_RPC_URL` or `WS_RPC_URL_A` (optional WebSocket; enables live subscriptions)
 - `ENDPOINT_ADDR` (verifier agent)
 - `VERIFIER_ADDR`
 - `EXECUTOR_ADDR` (executor agent)
 - `PRIVATE_KEY` (Anvil’s default works for local)
+- Scanning controls (to avoid missing events): `START_BLOCK`, `LOOKBACK_BLOCKS` (default 5000), `POLL_INTERVAL_MS` (default 2000), `SCAN_RANGE` (default 2000)
 
 Run agents with npm scripts:
-- `npm run agent:verifier`
-- `npm run agent:executor`
+- Preferred (TypeScript via tsx):
+  - `npm run agent:verifier`
+  - `npm run agent:executor`
+- If your environment struggles with ESM loaders, run compiled JS:
+  - `npm run agent:verifier:dist`
+  - `npm run agent:executor:dist`
 
 See RUNBOOK.md for a full step-by-step deployment and run guide.
+
+## Quick Start with Tenderly RPC
+
+- Deploy contracts and auto-write `.env` using your Tenderly endpoint:
+
+  - `npm run deploy:oft` (uses `https://virtual.mainnet.eu.rpc.tenderly.co/f09a8ab7-aa41-4acb-811c-88161d25a778` by default)
+
+- Run agents (two terminals):
+
+  - `npm run agent:verifier`
+  - `npm run agent:executor`
+
+- Trigger a bridge (mints, approves, estimates, and sends):
+
+  - `npm run bridge`
+  - Optional: `ENV_PATH=./.env npm run bridge` to specify a different env file
+
+The deploy script writes all addresses to `.env` and sets `RPC_URL` so the agents and bridge helper use the same network.
+
+Bridge helper envs:
+- Reads addresses and RPC from `.env` by default; override path with `ENV_PATH=/path/to/.env`.
+- If `.env` contains a WebSocket-only `RPC_URL`, set `HTTP_RPC_URL` to the HTTPS Tenderly endpoint for `cast` commands; otherwise it will auto-derive HTTP by replacing `wss://` with `https://`.
 
 ## Two-Node Local Run (future wiring)
 

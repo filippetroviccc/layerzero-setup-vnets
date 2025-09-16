@@ -6,12 +6,18 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "agent:verifier": "ts-node --esm agents/verifier-agent.ts",
-    "agent:executor": "ts-node --esm agents/executor-agent.ts"
+    "deploy:oft": "bash helper/deploy_oft.sh",
+    "bridge": "bash helper/trigger_bridge.sh",
+    "bridge:op": "bash helper/trigger_bridge.sh",
+    "agent:verifier": "tsx agents/verifier-agent.ts",
+    "agent:executor": "tsx agents/executor-agent.ts",
+    "agent:verifier:dist": "npm run build && node dist/agents/verifier-agent.js",
+    "agent:executor:dist": "npm run build && node dist/agents/executor-agent.js"
   },
   "devDependencies": {
     "@types/node": "^22.5.4",
     "ts-node": "^10.9.2",
+    "tsx": "^4.19.0",
     "typescript": "^5.6.2"
   },
   "dependencies": {
@@ -19,4 +25,3 @@
     "ethers": "^6.13.2"
   }
 }
-

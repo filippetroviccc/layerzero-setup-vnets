@@ -7,6 +7,9 @@ remappings = [
     "@openzeppelin/=lib/openzeppelin-contracts/",
     "solidity-examples/=lib/solidity-examples/",
 ]
+optimizer = true
+optimizer_runs = 200
+via_ir = true
 
 [fmt]
 line_length = 100
