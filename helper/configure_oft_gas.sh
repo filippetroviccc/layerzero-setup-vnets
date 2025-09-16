@@ -5,7 +5,7 @@ set -euo pipefail
 # Reads ENV_PATH (default ./.env). Uses HTTP_RPC_URL if set; else derives HTTPS from RPC_URL when it's WSS.
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ENV_PATH=${ENV_PATH:-"$ROOT_DIR/.env"}
+ENV_PATH=${ENV_PATH:-"$ROOT_DIR/../.env"}
 PT_SEND=0
 PT_SEND_AND_CALL=1
 MIN_GAS=${MIN_GAS:-200000}

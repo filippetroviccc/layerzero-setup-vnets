@@ -8,7 +8,7 @@ set -euo pipefail
 # - Scans last LOOKBACK_BLOCKS (default 5000) for expected events
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ENV_PATH=${ENV_PATH:-"$ROOT_DIR/.env"}
+ENV_PATH=${ENV_PATH:-"$ROOT_DIR/../.env"}
 LOOKBACK_BLOCKS=${LOOKBACK_BLOCKS:-5000}
 
 req() { command -v "$1" >/dev/null 2>&1 || { echo "Error: $1 not found. Please install it." >&2; exit 1; }; }
