@@ -1,52 +1,46 @@
-# PRD: Local Setup of LayerZero OFTs with Verifier Network & Executors
+# PRD: Local Setup of LayerZero OFTs with Verifier & Executor Agents
 
 ## Background & Context
 
-LayerZero enables trust-minimized cross-chain messaging. In production, its stack involves:
-
-* **Endpoints**: contract gateways on each chain.
-* **Verifiers (Oracle/Verifier Network)**: independently fetch proofs from source chain and attest.
-* **Executors (Relayers)**: submit payloads to the destination chain after proofs are verified.
-* **OFTs (Omnichain Fungible Tokens)**: assets that leverage LayerZero messaging to move across chains.
-
-Earlier scope covered only endpoints + mocks. This update introduces **Verifier Network + Executors** so the dev setup mimics the full LayerZero lifecycle locally.
+LayerZero Endpoint V2 emits canonical events (`PacketSent`, `PacketVerified`, `PacketDelivered`) that drive the verifier/executor
+network. The goal of this repo is to mirror that flow locally by pairing a v2-compatible endpoint mock with lightweight off-chai
+n agents. Developers can observe the same lifecycle as production while retaining deterministic control over who verifies and exe
+cutes packets.
 
 ---
 
 ## Goals
 
-* Provide a **local full-stack simulation** of LayerZero message flow.
-* Deploy OFTs for two custom tokens, with realistic verification & execution paths.
-* Demonstrate end-to-end bridging flow: send → proof → verify → execute → receive.
+* Provide a **full-stack simulation** of the Endpoint V2 messaging pipeline.
+* Deploy OFTs on two local chains, with locking/minting semantics that follow LayerZero patterns.
+* Demonstrate the full lifecycle: send → `PacketSent` → verifier submits `verify` → executor triggers delivery → balances update.
 
 ---
 
 ## Scope
 
-### In-Scope
+### In Scope
 
-* **Environment**: Two local Foundry chains.
-* **Token deployment**: Deploy two ERC20s + wrap into OFTs.
-* **Endpoint deployment**: Mock endpoints on each chain.
-* **Verifier Network**: Contracts + off-chain component simulating proof attestation.
-* **Executor**: Off-chain service or Solidity mock that relays verified payloads.
-* **End-to-end bridging flow**:
-
-    * Mint → Send via OFT → Proof verified → Executor delivers → Balances updated.
+* **Environment**: Two Foundry chains (or Tenderly RPCs) connected via the mock endpoints.
+* **Tokens/OFTs**: Minimal ERC20s wrapped by custom OFTs that use the Endpoint V2 mock.
+* **Endpoint Mock**: `GatedEndpointV2Mock` that stores packets, exposes view helpers, and requires authorized verifier/executor a
+ctors.
+* **Agents**: TypeScript services that watch on-chain events and exercise `verify` / `Executor.execute`.
+* **End-to-end flow**: Mint on chain A → send → agent verifies → agent executes → recipient receives minted tokens on chain B.
 
 ### Out of Scope
 
-* Decentralized verifier coordination logic (we’ll simulate with single/multi-verifier mocks).
-* Economics (fees, stake, slash).
-* Production endpoint contracts (use mocks).
+* Real LayerZero Endpoint deployments (mock only).
+* Decentralized verifier consensus or economic incentives.
+* Advanced OFT features (fee sharing, compose options, etc.).
 
 ---
 
 ## Strategic Fit
 
-* Moves beyond simple demo to **protocol-level simulation**.
-* Provides Tenderly engineering with a playground to validate **intents, bridging, and relayer flows** for Virtual TestNets.
-* Foundation for building **custom Verifier/Executor layers** on top of LayerZero.
+* Gives Tenderly engineering a reproducible playground that behaves like Endpoint V2.
+* Enables experimentation with intents, DVN simulations, and executor strategies before hitting real networks.
+* Lays the groundwork for custom verifier/executor orchestration inside Virtual TestNets.
 
 ---
 
@@ -55,112 +49,68 @@ Earlier scope covered only endpoints + mocks. This update introduces **Verifier 
 ### Components
 
 1. **ERC20 Tokens**
-
-    * `TokenA.sol`, `TokenB.sol` (OpenZeppelin ERC20).
+   * `TokenA.sol`, `TokenB.sol` (simple ownable ERC20s with configurable `minter`).
 
 2. **OFT Contracts**
+   * `BaseOFTV2` handles quote/send/receive logic against the mock endpoint.
+   * `OFT_A` locks canonical liquidity; `OFT_B` mints/burns a representation.
 
-    * Wrap TokenA/TokenB with OFTV2 contracts.
-    * Configurable trusted remotes.
+3. **LayerZero Endpoint Mock**
+   * `GatedEndpointV2Mock` implements the v2 structs/events, tracks GUIDs, and enforces verifier/executor authorization.
+   * Emits the same events production infrastructure consumes.
 
-3. **LayerZero Endpoints**
+4. **Executor Contract**
+   * `Executor.sol` exposes `execute(bytes32 guid)` and forwards to `endpoint.deliver`.
 
-    * `LZEndpointMock.sol` for each chain.
-    * Handles message passing hooks.
-
-4. **Verifier Network**
-
-    * **Verifier contract**: Receives source chain block hash, stores/verifies proof commitments.
-    * **Verifier agent** (off-chain): Monitors Chain A, submits proof attestations to Verifier contract.
-    * Minimal “multi-verifier consensus” can be simulated with quorum of N signatures.
-
-5. **Executor**
-
-    * **Executor contract**: Receives verified messages.
-    * **Executor agent**: Listens for “message ready” events from verifier, submits payload to destination endpoint/OFT.
-
----
+5. **Off-Chain Agents**
+   * **Verifier agent**: listens to `PacketSent`, decodes the packet, calls `verify` on the destination endpoint.
+   * **Executor agent**: listens to `PacketVerified`, computes the GUID, calls `Executor.execute`.
 
 ### Deployment Flow
 
-1. **Spin up 2 Foundry chains**.
-
-2. **Deploy on Chain A**:
-
-    * `TokenA`
-    * `OFT_A`
-    * `LZEndpointMockA`
-
-3. **Deploy on Chain B**:
-
-    * `TokenB`
-    * `OFT_B`
-    * `LZEndpointMockB`
-
-4. **Deploy Verifier Network** (shared infra, can exist per chain or centrally):
-
-    * `Verifier.sol` (accepts proof submissions).
-    * Deploy one per chain for local simulation.
-
-5. **Deploy Executor**:
-
-    * `Executor.sol` linked to endpoint on Chain B.
-    * Configured to only execute after verifier marks proof as valid.
-
-6. **Configure connections**:
-
-    * Map endpoints (ChainA ↔ ChainB).
-    * Register OFT\_A and OFT\_B as trusted remotes.
-    * Wire verifier + executor logic into endpoint mocks.
-
-7. **Test flow**:
-
-    * Mint TokenA on Chain A.
-    * Call OFT\_A to send tokens → emits message event.
-    * Off-chain verifier agent picks event, submits proof to Verifier contract.
-    * Executor agent detects verified message, calls endpoint on Chain B.
-    * OFT\_B mints tokens to recipient.
-    * Verify balances.
+1. **Launch chains** (two Anvil instances or Tenderly RPCs).
+2. **Deploy endpoints** on each chain via `GatedEndpointV2Mock`.
+3. **Deploy tokens/OFTs** (TokenA + OFT_A on chain A, OFT_B on chain B).
+4. **Wire configuration**:
+   * `setRemoteEndpoint` between mocks.
+   * `setPeer` on both OFTs.
+   * `setVerifier` / `setExecutor` on each endpoint.
+5. **Deploy executors** and register with endpoints.
+6. **Run agents** to process packets.
+7. **Test bridge**: Mint TokenA, call `OFT_A.send`, wait for agents, verify balances on chain B.
 
 ---
 
 ## Deliverables
 
-* **Contracts**:
-
-    * `TokenA.sol`, `TokenB.sol`
-    * `OFT_A.sol`, `OFT_B.sol`
-    * `LZEndpointMock.sol`
-    * `Verifier.sol`, `Executor.sol`
-
-* **Agents (off-chain)**:
-
-    * `verifier-agent.ts` (listen, build proof, submit).
-    * `executor-agent.ts` (watch verifier, deliver payload).
-
-* **Scripts**:
-
-    * `Deploy.s.sol` – full deployment for both chains.
-    * `Config.s.sol` – set remotes, register verifier/executor.
-    * `BridgeTest.t.sol` – integration test covering proof + execution flow.
-
-* **Docs**:
-
-    * `README.md` with step-by-step runbook.
+* **Contracts**
+  * `TokenA.sol`, `TokenB.sol`
+  * `OFT_A.sol`, `OFT_B.sol`, `BaseOFTV2.sol`
+  * `GatedEndpointV2Mock.sol`
+  * `Executor.sol`
+* **Agents**
+  * `agents/verifier-agent.ts`
+  * `agents/executor-agent.ts`
+* **Scripts & Tests**
+  * `script/Deploy.s.sol`
+  * `helper/deploy_oft.sh`, `helper/trigger_bridge.sh`
+  * `test/BridgeTest.t.sol`
+* **Docs**
+  * Updated `README.md` outlining workflow and agent usage.
 
 ---
 
 ## Success Metrics
 
-* Token bridging requires both **verifier** and **executor** to succeed.
-* Disabling verifier/executor should halt bridging (simulate security guarantees).
-* Reproducible end-to-end test with Foundry (`forge test`) and off-chain scripts.
+* Without verifier or executor calls, packets remain queued (no balances updated).
+* With agents running, tokens bridge end-to-end and `PacketDelivered` fires.
+* `forge test` reproduces the entire lifecycle deterministically.
 
 ---
 
 ## Future Extensions
 
-* Add **multiple verifiers** with consensus logic.
-* Simulate **malicious verifier** to test fault tolerance.
-* Add **economic model** (fees, slashing).
-* Integrate into Tenderly VNets for multi-region cross-chain tests.
+* Support multiple verifiers with quorum logic.
+* Inject adversarial verifier/executor behaviours to test resilience.
+* Expand OFT options handling (e.g., compose messages, native drops).
+* Integrate with Tenderly VNets for multi-region testing.

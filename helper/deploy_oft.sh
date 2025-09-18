@@ -1,78 +1,61 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-forge build
-forge test -vvv
+export RPC_URL=${RPC_URL:-https://virtual.mainnet.eu.rpc.tenderly.co/f09a8ab7-aa41-4acb-811c-88161d25a778}
+export WS_RPC_URL=${WS_RPC_URL:-wss://virtual.mainnet.eu.rpc.tenderly.co/f09a8ab7-aa41-4acb-811c-88161d25a778}
+export PRIVATE_KEY=${PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d}
+export FROM=${FROM:-0x70997970c51812dc3a010c7d01b50e0d17dc79c8}
 
-export RPC_URL=https://virtual.mainnet.eu.rpc.tenderly.co/f09a8ab7-aa41-4acb-811c-88161d25a778
-export WS_RPC_URL=wss://virtual.mainnet.eu.rpc.tenderly.co/f09a8ab7-aa41-4acb-811c-88161d25a778
-export PRIVATE_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
-export FROM=0x70997970c51812dc3a010c7d01b50e0d17dc79c8
+DEFAULT_OPTIONS_HEX=$(cast abi-encode "f(uint256,uint256)" 200000 0)
 
-forge create src/layerzero/GatedLZEndpointMock.sol:GatedLZEndpointMock \
-  --rpc-url $RPC_URL --broadcast --private-key=$PRIVATE_KEY --json --constructor-args 101 | tee ./epA.json
+forge create src/layerzero/GatedEndpointV2Mock.sol:GatedEndpointV2Mock \
+  --rpc-url "$RPC_URL" --broadcast --private-key="$PRIVATE_KEY" --json --constructor-args 101 | tee ./epA.json
 export EP_A=$(jq -r '.deployedTo' ./epA.json)
 
-forge create src/layerzero/GatedLZEndpointMock.sol:GatedLZEndpointMock \
-  --rpc-url $RPC_URL --broadcast --private-key=$PRIVATE_KEY --json --constructor-args 102 | tee ./epB.json
+forge create src/layerzero/GatedEndpointV2Mock.sol:GatedEndpointV2Mock \
+  --rpc-url "$RPC_URL" --broadcast --private-key="$PRIVATE_KEY" --json --constructor-args 102 | tee ./epB.json
 export EP_B=$(jq -r '.deployedTo' ./epB.json)
 
+echo "Configuring remote endpoints"
+cast send "$EP_A" "setRemoteEndpoint(uint32,address)" 102 "$EP_B" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY"
+cast send "$EP_B" "setRemoteEndpoint(uint32,address)" 101 "$EP_A" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY"
 
 forge create src/tokens/TokenA.sol:TokenA \
-  --rpc-url $RPC_URL --broadcast --private-key=$PRIVATE_KEY --json | tee ./tA.json
+  --rpc-url "$RPC_URL" --broadcast --private-key "$PRIVATE_KEY" --json | tee ./tA.json
 export TOKEN_A=$(jq -r '.deployedTo' ./tA.json)
 
+echo "Deploying OFTs"
 forge create src/oft/OFT_A.sol:OFT_A \
-  --rpc-url $RPC_URL --broadcast --private-key=$PRIVATE_KEY --json \
-  --constructor-args $TOKEN_A 18 $EP_A | tee ./oA.json
+  --rpc-url "$RPC_URL" --broadcast --private-key="$PRIVATE_KEY" --json \
+  --constructor-args "$TOKEN_A" "$EP_A" "$DEFAULT_OPTIONS_HEX" | tee ./oA.json
 export OFT_A=$(jq -r '.deployedTo' ./oA.json)
 
 forge create src/oft/OFT_B.sol:OFT_B \
-  --rpc-url $RPC_URL --broadcast --private-key=$PRIVATE_KEY --json \
-  --constructor-args TokenA TKA 18 $EP_B | tee ./oB.json
+  --rpc-url "$RPC_URL" --broadcast --private-key="$PRIVATE_KEY" --json \
+  --constructor-args TokenA TKA "$EP_B" "$DEFAULT_OPTIONS_HEX" | tee ./oB.json
 export OFT_B=$(jq -r '.deployedTo' ./oB.json)
 
-cast send $EP_A "setDestLzEndpoint(address,address)" $OFT_B $EP_B --rpc-url $RPC_URL --private-key $PRIVATE_KEY
-cast send $EP_B "setDestLzEndpoint(address,address)" $OFT_A $EP_A --rpc-url $RPC_URL --private-key $PRIVATE_KEY
+echo "Setting peers"
+cast send "$OFT_A" "setPeer(uint32,bytes32)" 102 "$(cast --to-bytes32 "$OFT_B")" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY"
+cast send "$OFT_B" "setPeer(uint32,bytes32)" 101 "$(cast --to-bytes32 "$OFT_A")" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY"
 
-
-export PATH_A_TO_B=$(cast abi-encode --packed "f(address,address)" $OFT_B $OFT_A | sed 's/^0x//')
-export PATH_B_TO_A=$(cast abi-encode --packed "f(address,address)" $OFT_A $OFT_B | sed 's/^0x//')
-
-
-cast send $OFT_A "setMinDstGas(uint16,uint16,uint256)" 102 0 200000 --rpc-url $RPC_URL --private-key $PRIVATE_KEY
-cast send $OFT_A "setMinDstGas(uint16,uint16,uint256)" 102 1 200000 --rpc-url $RPC_URL --private-key $PRIVATE_KEY
-cast send $OFT_B "setMinDstGas(uint16,uint16,uint256)" 101 0 200000 --rpc-url $RPC_URL --private-key $PRIVATE_KEY
-cast send $OFT_B "setMinDstGas(uint16,uint16,uint256)" 101 1 200000 --rpc-url $RPC_URL --private-key $PRIVATE_KEY
-
-
-cast send $OFT_A "setTrustedRemote(uint16,bytes)" 102 0x$PATH_A_TO_B --rpc-url $RPC_URL --private-key $PRIVATE_KEY
-cast send $OFT_B "setTrustedRemote(uint16,bytes)" 101 0x$PATH_B_TO_A --rpc-url $RPC_URL --private-key $PRIVATE_KEY
-
-
-forge create src/infra/Verifier.sol:Verifier \
-  --rpc-url $RPC_URL --broadcast --private-key $PRIVATE_KEY --json | tee ./vA.json
-export VERIFIER_A=$(jq -r '.deployedTo' ./vA.json)
-
-forge create src/infra/Verifier.sol:Verifier \
-  --rpc-url $RPC_URL --broadcast --private-key $PRIVATE_KEY --json | tee ./vB.json
-export VERIFIER_B=$(jq -r '.deployedTo' ./vB.json)
-
+echo "Deploying executors"
 forge create src/infra/Executor.sol:Executor \
-  --rpc-url $RPC_URL --broadcast --private-key $PRIVATE_KEY --json \
-  --constructor-args $EP_A | tee ./exA.json
+  --rpc-url "$RPC_URL" --broadcast --private-key "$PRIVATE_KEY" --json \
+  --constructor-args "$EP_A" | tee ./exA.json
 export EXECUTOR_A=$(jq -r '.deployedTo' ./exA.json)
 
 forge create src/infra/Executor.sol:Executor \
-  --rpc-url $RPC_URL --broadcast --private-key $PRIVATE_KEY --json \
-  --constructor-args $EP_B | tee ./exB.json
+  --rpc-url "$RPC_URL" --broadcast --private-key "$PRIVATE_KEY" --json \
+  --constructor-args "$EP_B" | tee ./exB.json
 export EXECUTOR_B=$(jq -r '.deployedTo' ./exB.json)
 
-cast send $EP_A "setVerifier(address)" $VERIFIER_A --rpc-url $RPC_URL --private-key $PRIVATE_KEY
-cast send $EP_A "setExecutor(address)" $EXECUTOR_A --rpc-url $RPC_URL --private-key $PRIVATE_KEY
-cast send $EP_B "setVerifier(address)" $VERIFIER_B --rpc-url $RPC_URL --private-key $PRIVATE_KEY
-cast send $EP_B "setExecutor(address)" $EXECUTOR_B --rpc-url $RPC_URL --private-key $PRIVATE_KEY
+echo "Authorizing verifier/executor"
+cast send "$EP_A" "setExecutor(address)" "$EXECUTOR_A" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY"
+cast send "$EP_B" "setExecutor(address)" "$EXECUTOR_B" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY"
+cast send "$EP_A" "setVerifier(address)" "$FROM" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY"
+cast send "$EP_B" "setVerifier(address)" "$FROM" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY"
 
-# --- Write environment variables to repo root .env for agents/tools ---
 ENV_FILE="$(cd "$(dirname "$0")"/.. && pwd)/.env"
 echo "Writing environment to $ENV_FILE"
 {
@@ -91,19 +74,18 @@ echo "Writing environment to $ENV_FILE"
   echo "OFT_A=$OFT_A"
   echo "OFT_B=$OFT_B"
   echo
-  echo "# Verifier / Executor"
-  echo "VERIFIER_A=$VERIFIER_A"
-  echo "VERIFIER_B=$VERIFIER_B"
+  echo "# Executors"
   echo "EXECUTOR_A=$EXECUTOR_A"
   echo "EXECUTOR_B=$EXECUTOR_B"
   echo
-  echo "# Trusted Paths (A->B, B->A)"
-  echo "PATH_A_TO_B=0x$PATH_A_TO_B"
-  echo "PATH_B_TO_A=0x$PATH_B_TO_A"
+  echo "# Default options"
+  echo "DEFAULT_OPTIONS=$DEFAULT_OPTIONS_HEX"
   echo
-  echo "# Agent defaults (source side)"
-  echo "ENDPOINT_ADDR=$EP_A"
-  echo "VERIFIER_ADDR=$VERIFIER_A"
+  echo "# Agent defaults"
+  echo "SOURCE_ENDPOINT=$EP_A"
+  echo "DEST_ENDPOINT=$EP_B"
+  echo "VERIFIER_ADDR=$FROM"
   echo "EXECUTOR_ADDR=$EXECUTOR_A"
 } > "$ENV_FILE"
-echo "Done. You can now run: \n  npm run agent:verifier\n  npm run agent:executor"
+
+echo "Done. Run npm run agent:verifier and npm run agent:executor to process messages."

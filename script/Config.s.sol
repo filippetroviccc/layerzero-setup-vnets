@@ -2,34 +2,28 @@
 pragma solidity ^0.8.20;
 
 // Placeholder config script. In a full setup, use forge-std Script to
-// connect to two RPCs and wire endpoints + trusted remotes.
-
-// import "solidity-examples/contracts/lzApp/mocks/LZEndpointMock.sol";
-import {ICommonOFT} from "solidity-examples/contracts/token/oft/v2/interfaces/ICommonOFT.sol";
+// connect to two RPCs and wire endpoints, peers, and executors.
 
 contract Config {
-    function setRemotes(address endpointA, address endpointB, address oftA, address oftB) external {
-        LZEndpointLike(endpointA).setDestLzEndpoint(oftB, endpointB);
-        LZEndpointLike(endpointB).setDestLzEndpoint(oftA, endpointA);
+    function wireEndpoints(address endpointA, address endpointB, uint32 eidA, uint32 eidB) external {
+        IEndpoint(endpointA).setRemoteEndpoint(eidB, endpointB);
+        IEndpoint(endpointB).setRemoteEndpoint(eidA, endpointA);
     }
 
-    function setTrustedRemotes(address oftA, address oftB) external {
-        bytes memory pathAtoB = abi.encodePacked(oftB, oftA);
-        bytes memory pathBtoA = abi.encodePacked(oftA, oftB);
-        LzAppLike(oftA).setMinDstGas(102, 0, 200000);
-        LzAppLike(oftA).setMinDstGas(102, 1, 200000);
-        LzAppLike(oftB).setMinDstGas(101, 0, 200000);
-        LzAppLike(oftB).setMinDstGas(101, 1, 200000);
-        LzAppLike(oftA).setTrustedRemote(102, pathAtoB);
-        LzAppLike(oftB).setTrustedRemote(101, pathBtoA);
+    function setPeers(address oftA, address oftB, uint32 eidA, uint32 eidB) external {
+        IOFT(oftA).setPeer(eidB, _toBytes32(oftB));
+        IOFT(oftB).setPeer(eidA, _toBytes32(oftA));
+    }
+
+    function _toBytes32(address a) internal pure returns (bytes32) {
+        return bytes32(uint256(uint160(a)));
     }
 }
 
-interface LzAppLike {
-    function setTrustedRemote(uint16 _remoteChainId, bytes calldata _path) external;
-    function setMinDstGas(uint16 _dstChainId, uint16 _packetType, uint _minGas) external;
+interface IEndpoint {
+    function setRemoteEndpoint(uint32 remoteEid, address endpoint) external;
 }
 
-interface LZEndpointLike {
-    function setDestLzEndpoint(address destAddr, address lzEndpointAddr) external;
+interface IOFT {
+    function setPeer(uint32 eid, bytes32 peer) external;
 }
