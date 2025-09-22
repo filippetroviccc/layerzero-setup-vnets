@@ -1,11 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "solidity-examples/contracts/token/oft/v2/ProxyOFTV2.sol";
+import {BaseOFTV2} from "./BaseOFTV2.sol";
+import {SimpleERC20} from "../tokens/SimpleERC20.sol";
 
-contract OFT_A is ProxyOFTV2 {
-    constructor(address token, uint8 sharedDecimals, address lzEndpoint)
-        // Force a safe sharedDecimals (e.g., 6) to keep amountSD within uint64 bounds
-        ProxyOFTV2(token, 6, lzEndpoint)
-    {}
+contract OFT_A is BaseOFTV2 {
+    SimpleERC20 public immutable token;
+
+    constructor(address token_, address endpoint_, bytes memory defaultOptions)
+        BaseOFTV2(endpoint_, defaultOptions)
+    {
+        token = SimpleERC20(token_);
+    }
+
+    function _debit(address from, uint256 amountLD, uint32 /*dstEid*/ ) internal override {
+        require(token.transferFrom(from, address(this), amountLD), "OFT: transferFrom failed");
+    }
+
+    function _credit(address to, uint256 amountLD, uint32 /*srcEid*/ ) internal override {
+        require(token.transfer(to, amountLD), "OFT: transfer failed");
+    }
 }

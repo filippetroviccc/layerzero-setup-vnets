@@ -1,100 +1,108 @@
-# LayerZero OFT Local Setup (Initial Scaffold)
+# LayerZero OFT Local Setup (Endpoint V2 Mock)
 
-This repository sets up a local environment to experiment with Omnichain Fungible Tokens (OFTs) using OFTV2 and a gated LayerZero endpoint mock that requires a Verifier + Executor, per the PRD.
+This repository sets up a local development environment to experiment with Omnichain Fungible Tokens (OFTs) on top of a LayerZero
+Endpoint V2–style mock. Messages emit the real `PacketSent`, `PacketVerified`, and `PacketDelivered` events, and delivery is gate
+ed by an explicit verifier/executor pair so the flow mirrors the production pipeline.
 
 ## Layout
 
-- `src/tokens/` — Minimal ERC20s (`TokenA`, `TokenB`) with owner minting and an assignable `minter` (the OFT).
-- `src/oft/` — Thin wrappers around official OFTV2:
-  - `OFT_A` (ProxyOFTV2) locks the canonical ERC20 on Chain A
-  - `OFT_B` (OFTV2) mints/burns the representation on Chain B
-- `src/layerzero/GatedLZEndpointMock.sol` — Endpoint mock that enqueues messages and requires verification + execution
-- `src/infra/Verifier.sol` — Off-chain agent submits `messageId` attestations
-- `src/infra/Executor.sol` — Called by off-chain agent to trigger delivery on the endpoint
-- Official examples from LayerZero are pulled via `solidity-examples` dependency.
-- `script/` — Placeholder deploy/config scripts (no forge-std deps yet).
-- `test/` — A Foundry test that validates the basic bridge flow.
- - `agents/` — Minimal TypeScript agents to simulate verifier/executor off-chain
+- `src/tokens/` — Minimal ERC20s (`TokenA`, `TokenB`) with owner minting and an assignable `minter`.
+- `src/oft/` — Lightweight OFT adapters built for the mock endpoint:
+  - `OFT_A` locks the canonical ERC20 on chain A.
+  - `OFT_B` mints/burns a representation on chain B.
+- `src/layerzero/GatedEndpointV2Mock.sol` — Endpoint V2 mock that queues packets, emits canonical events, and requires an autho
+rized verifier/executor to progress messages.
+- `src/infra/Executor.sol` — Minimal executor contract the off-chain agent calls to trigger delivery.
+- `script/` — Convenience deploy helper that wires peers, executors, and verifiers.
+- `test/` — A Foundry test covering the full bridge flow using the new endpoint.
+- `agents/` — TypeScript verifier/executor agents that react to `PacketSent` / `PacketVerified`.
 
 ## Prerequisites
 
-- Foundry installed: `curl -L https://foundry.paradigm.xyz | bash` then `foundryup`
+- Foundry installed: `curl -L https://foundry.paradigm.xyz | bash` then `foundryup`.
+- Node.js 18+ for the TypeScript agents.
 
 ## Build & Test
 
-Install dependencies (already vendored via `forge install`) and run:
+Run the standard Foundry commands:
 
 ```
 forge build
 forge test -vvv
 ```
 
-`test/BridgeTest.t.sol` deploys gated endpoints for two chain IDs, deploys `TokenA` + `OFT_A` (ProxyOFTV2) on Chain A and `OFT_B` (OFTV2) on Chain B, wires trusted remotes/min gas, then demonstrates that bridging requires:
+`test/BridgeTest.t.sol` deploys two `GatedEndpointV2Mock` instances for endpoint IDs 101 and 102, sets up `TokenA` + `OFT_A` on
+chain A and `OFT_B` on chain B, wires peers, and demonstrates that bridging requires:
 
-- Verifier to attest the queued message id
-- Executor to call the endpoint to deliver
+1. `PacketSent` on the source endpoint → verifier agent calls `verify(origin, receiver, payloadHash)` on the destination endpoin
+t.
+2. `PacketVerified` on the destination endpoint → executor agent calls the on-chain `Executor`, which in turn calls `deliver(gui
+d, extraData)` on the endpoint.
+3. `PacketDelivered` fires once `lzReceive` succeeds on the destination OFT.
 
-## How It Works (Simplified)
+## How It Works
 
-- `GatedLZEndpointMock` keeps a mapping of remote endpoints by chain ID and enqueues payloads.
-- Verifier must mark the `messageId` as verified before delivery.
-- Executor triggers delivery which calls `lzReceive` on the destination OFT.
-- `SimpleOFT` stores a `trustedRemoteOFT` per chain. `sendToChain` burns local tokens then asks the mock endpoint to deliver a mint request to the remote OFT, which mints on receipt.
-- `SimpleERC20` supports `ownerMint` (bootstrap supply) and a `minter` (the OFT) that can `mint`/`burnFrom` for bridging.
+- `GatedEndpointV2Mock` stores outbound packets by GUID, exposes view helpers, and enforces the same origin/nonce bookkeeping as
+ the production endpoint. Verifier/executor addresses are configurable via `setVerifier`/`setExecutor`.
+- `BaseOFTV2` abstracts the OFT send/receive logic. Derived contracts implement `_debit` / `_credit` to lock or mint tokens and
+ configure peers with `setPeer(eid, peer)`.
+- `Executor` is a thin proxy contract so the off-chain agent can call `execute(guid)`; the endpoint checks that the caller is the
+ registered executor before delivering the packet.
 
-## Off-Chain Agents (local)
+## Off-Chain Agents
 
-- `agents/verifier-agent.ts`: listens for `MessageQueued` on the source endpoint and calls `Verifier.submitAttestation(messageId)`.
-- `agents/executor-agent.ts`: listens for `Verified` and calls `Executor.execute(messageId)`.
+- `agents/verifier-agent.ts` listens for `PacketSent` on the source endpoint, decodes the packet, and calls `verify` on the desti
+nation endpoint using the configured signer.
+- `agents/executor-agent.ts` listens for `PacketVerified` on the destination endpoint, computes the GUID, and calls `Executor.exe
+cute(guid)`.
 
-Setup:
-- Copy `.env.example` to `.env` and fill addresses.
-- Install deps: `npm install`
+Environment variables (shared by both agents):
 
-Env variables:
-- `RPC_URL` or `RPC_URL_A` (HTTP)
-- `WS_RPC_URL` or `WS_RPC_URL_A` (optional WebSocket; enables live subscriptions)
-- `ENDPOINT_ADDR` (verifier agent)
-- `VERIFIER_ADDR`
-- `EXECUTOR_ADDR` (executor agent)
-- `PRIVATE_KEY` (Anvil’s default works for local)
-- Scanning controls (to avoid missing events): `START_BLOCK`, `LOOKBACK_BLOCKS` (default 5000), `POLL_INTERVAL_MS` (default 2000), `SCAN_RANGE` (default 2000)
+- `RPC_URL` or `RPC_URL_A/B` (HTTP)
+- `WS_RPC_URL` or `WS_RPC_URL_A/B` (optional WebSocket; enables live subscriptions)
+- `SOURCE_ENDPOINT` / `DEST_ENDPOINT` (endpoints emitting the events)
+- `EXECUTOR_ADDR` (executor contract to call)
+- `PRIVATE_KEY` (controls both the verifier and executor transactions)
+- Scanning controls: `START_BLOCK`, `LOOKBACK_BLOCKS` (default 5000), `POLL_INTERVAL_MS` (default 2000), `SCAN_RANGE` (default 200
+0)
 
-Run agents with npm scripts:
-- Preferred (TypeScript via tsx):
+Run the agents via npm scripts:
+
+- Development (tsx):
   - `npm run agent:verifier`
   - `npm run agent:executor`
-- If your environment struggles with ESM loaders, run compiled JS:
+- Compiled JS:
   - `npm run agent:verifier:dist`
   - `npm run agent:executor:dist`
 
-See RUNBOOK.md for a full step-by-step deployment and run guide.
-
 ## Quick Start with Tenderly RPC
 
-- Deploy contracts and auto-write `.env` using your Tenderly endpoint:
+- Deploy contracts and auto-write `.env` using the helper script:
 
-  - `npm run deploy:oft` (uses `https://virtual.mainnet.eu.rpc.tenderly.co/f09a8ab7-aa41-4acb-811c-88161d25a778` by default)
+  - `npm run deploy:oft` (defaults to `https://virtual.mainnet.eu.rpc.tenderly.co/f09a8ab7-aa41-4acb-811c-88161d25a778`)
 
 - Run agents (two terminals):
 
   - `npm run agent:verifier`
   - `npm run agent:executor`
 
-- Trigger a bridge (mints, approves, estimates, and sends):
+- Trigger a bridge (mints, approves, quotes, sends):
 
   - `npm run bridge`
-  - Optional: `ENV_PATH=./.env npm run bridge` to specify a different env file
+  - Override env path with `ENV_PATH=./.env npm run bridge`
 
-The deploy script writes all addresses to `.env` and sets `RPC_URL` so the agents and bridge helper use the same network.
+The deploy helper writes endpoint/OFT/executor addresses, default options, and RPC URLs to `.env` so the agents and helper share
+ configuration.
 
 Bridge helper envs:
+
 - Reads addresses and RPC from `.env` by default; override path with `ENV_PATH=/path/to/.env`.
-- If `.env` contains a WebSocket-only `RPC_URL`, set `HTTP_RPC_URL` to the HTTPS Tenderly endpoint for `cast` commands; otherwise it will auto-derive HTTP by replacing `wss://` with `https://`.
+- If `.env` contains a WebSocket-only RPC, set `HTTP_RPC_URL` or rely on the helper’s automatic replacement of `wss://` → `https:
+//`.
 
 ## Two-Node Local Run (future wiring)
 
-When ready to split across two local chains, run two Anvil instances and use forge scripts:
+When ready to split across two local chains, run two Anvil instances and point the deploy/agent scripts at each RPC:
 
 ```
 # Terminal 1
@@ -102,6 +110,7 @@ anvil --port 8545 --chain-id 101
 
 # Terminal 2
 anvil --port 9545 --chain-id 102
-
-# Then replace placeholder scripts with forge-std variants to deploy to each RPC, configure remotes/trusted peers, and set endpoint verifier/executor addresses.
 ```
+
+Then deploy endpoints/OFTs to the respective RPCs, configure `setRemoteEndpoint`, `setPeer`, `setVerifier`, and `setExecutor`, a
+nd run the agents against the appropriate endpoints.
