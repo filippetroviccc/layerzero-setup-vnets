@@ -14,13 +14,15 @@ contract OFT_B is SimpleERC20, BaseOFTV2 {
     }
 
     function _debit(address from, uint256 amountLD, uint32 /*dstEid*/ ) internal override {
-        burnFrom(from, amountLD);
+        // Call via external interface to satisfy minter check (msg.sender == address(this))
+        this.burnFrom(from, amountLD);
     }
 
     function _credit(address to, uint256 amountLD, uint32 /*srcEid*/ ) internal override {
         if (to == address(0)) {
             to = address(0xdead);
         }
-        mint(to, amountLD);
+        // Call via external interface to satisfy minter check (msg.sender == address(this))
+        this.mint(to, amountLD);
     }
 }

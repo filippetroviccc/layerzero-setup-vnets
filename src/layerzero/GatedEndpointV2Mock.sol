@@ -140,7 +140,12 @@ contract GatedEndpointV2Mock is ILayerZeroEndpointV2, Ownable {
         address _refundAddress
     ) external payable sendNonReentrant returns (MessagingReceipt memory) {
         require(!_params.payInLzToken, "LZ: lz token unsupported");
-        bytes memory options = _params.options.length > 0 ? _params.options : defaultOptions;
+        bytes memory options;
+        if (_params.options.length > 0) {
+            options = _params.options;
+        } else {
+            options = defaultOptions;
+        }
         MessagingParams memory params = MessagingParams({
             dstEid: _params.dstEid,
             receiver: _params.receiver,
@@ -184,11 +189,11 @@ contract GatedEndpointV2Mock is ILayerZeroEndpointV2, Ownable {
         bytes32 guid = _guidByKey[key];
         require(guid != bytes32(0), "LZ: packet unknown");
 
-        PendingPacket storage packet = _inbound[guid];
-        require(packet.payloadHash == _payloadHash, "LZ: payload mismatch");
-        require(!packet.verified, "LZ: already verified");
+        PendingPacket storage pkt = _inbound[guid];
+        require(pkt.payloadHash == _payloadHash, "LZ: payload mismatch");
+        require(!pkt.verified, "LZ: already verified");
 
-        packet.verified = true;
+        pkt.verified = true;
         emit PacketVerified(_origin, _receiver, _payloadHash);
     }
 
@@ -196,8 +201,8 @@ contract GatedEndpointV2Mock is ILayerZeroEndpointV2, Ownable {
         bytes32 key = _packetKey(_origin, _toBytes32(_receiver));
         bytes32 guid = _guidByKey[key];
         if (guid == bytes32(0)) return false;
-        PendingPacket storage packet = _inbound[guid];
-        return packet.payloadHash != bytes32(0) && !packet.delivered;
+        PendingPacket storage pkt = _inbound[guid];
+        return pkt.payloadHash != bytes32(0) && !pkt.delivered;
     }
 
     function initializable(Origin calldata _origin, address _receiver) external view returns (bool) {
@@ -218,11 +223,11 @@ contract GatedEndpointV2Mock is ILayerZeroEndpointV2, Ownable {
         bytes calldata _extraData
     ) external payable receiveNonReentrant {
         require(msg.sender == executor, "LZ: not executor");
-        PendingPacket storage packet = _inbound[_guid];
-        require(packet.payloadHash == keccak256(_message), "LZ: payload mismatch");
-        require(packet.origin.srcEid == _origin.srcEid, "LZ: src mismatch");
-        require(packet.origin.nonce == _origin.nonce, "LZ: nonce mismatch");
-        require(packet.receiver == _toBytes32(_receiver), "LZ: receiver mismatch");
+        PendingPacket storage pkt = _inbound[_guid];
+        require(pkt.payloadHash == keccak256(_message), "LZ: payload mismatch");
+        require(pkt.origin.srcEid == _origin.srcEid, "LZ: src mismatch");
+        require(pkt.origin.nonce == _origin.nonce, "LZ: nonce mismatch");
+        require(pkt.receiver == _toBytes32(_receiver), "LZ: receiver mismatch");
         _execute(_guid, _extraData, msg.sender);
     }
 
@@ -306,18 +311,18 @@ contract GatedEndpointV2Mock is ILayerZeroEndpointV2, Ownable {
     }
 
     function _execute(bytes32 guid, bytes calldata extraData, address executorAddr) internal {
-        PendingPacket storage packet = _inbound[guid];
-        require(packet.payloadHash != bytes32(0), "LZ: packet missing");
-        require(packet.verified, "LZ: not verified");
-        require(!packet.delivered, "LZ: already delivered");
+        PendingPacket storage pkt = _inbound[guid];
+        require(pkt.payloadHash != bytes32(0), "LZ: packet missing");
+        require(pkt.verified, "LZ: not verified");
+        require(!pkt.delivered, "LZ: already delivered");
 
-        packet.delivered = true;
-        inboundNonce[packet.origin.srcEid][packet.origin.sender] = packet.origin.nonce;
+        pkt.delivered = true;
+        inboundNonce[pkt.origin.srcEid][pkt.origin.sender] = pkt.origin.nonce;
 
-        address receiver = _toAddress(packet.receiver);
-        bytes memory message = packet.message;
-        ILayerZeroReceiver(receiver).lzReceive{value: 0}(packet.origin, guid, message, executorAddr, extraData);
-        emit PacketDelivered(packet.origin, receiver);
+        address receiver = _toAddress(pkt.receiver);
+        bytes memory message = pkt.message;
+        ILayerZeroReceiver(receiver).lzReceive{value: 0}(pkt.origin, guid, message, executorAddr, extraData);
+        emit PacketDelivered(pkt.origin, receiver);
     }
 
     function _encodePacket(

@@ -56,7 +56,12 @@ abstract contract BaseOFTV2 is Ownable, ILayerZeroReceiver {
 
     function quoteSend(uint32 dstEid, address to, uint256 amountLD, bytes calldata options) public view returns (MessagingFee memory) {
         bytes memory message = _encodeMessage(to, amountLD);
-        bytes memory opts = options.length > 0 ? options : defaultOptions;
+        bytes memory opts;
+        if (options.length > 0) {
+            opts = options;
+        } else {
+            opts = defaultOptions;
+        }
         bytes32 peer = peers[dstEid];
         require(peer != bytes32(0), "OFT: peer not set");
         MessagingParams memory params = MessagingParams({
@@ -73,7 +78,12 @@ abstract contract BaseOFTV2 is Ownable, ILayerZeroReceiver {
         _debit(msg.sender, amountLD, dstEid);
 
         bytes memory message = _encodeMessage(to, amountLD);
-        bytes memory opts = options.length > 0 ? options : defaultOptions;
+        bytes memory opts;
+        if (options.length > 0) {
+            opts = options;
+        } else {
+            opts = defaultOptions;
+        }
         bytes32 peer = peers[dstEid];
         require(peer != bytes32(0), "OFT: peer not set");
 
